@@ -725,19 +725,34 @@ function renderCuenta(){
     </div>`;
 
   const rems=S.remitos.filter(r=>r.clienteId===id&&r.estado!=='anulado').map(r=>({
-    tipo:r.tipo||'remito',fecha:r.fecha||r.creadoEn?.slice(0,10)||'',
+    tipo:r.tipo||'remito',
+    fecha:r.fecha||String(r.creadoEn||'').slice(0,10)||'',
+    creadoEn:String(r.creadoEn||''),
+    numero:r.numero||0,
     desc:`${r.tipo==='entrega'?'Entrega':'Remito'} N° ${String(r.numero).padStart(4,'0')}${r.obs?' — '+r.obs:''}`,
     monto:Number(r.total||0),id:r.id,
-    reqFactura:r.requiereFactura||false,
-    facturado:r.facturado||false
+    reqFactura:!!(r.requiereFactura||r.reqFactura),
+    facturado:!!(r.facturado===true||r.facturado==='true'||r.facturado==='TRUE')
   }));
   const pags=S.pagos.filter(p=>p.clienteId===id).map(p=>({
     tipo:'pago',fecha:p.fecha||'',
+    creadoEn:String(p.id||''),
+    numero:0,
     desc:`Pago${p.obs?' — '+p.obs:''}`,
-    medio:p.medio||'',factura:p.requiereFactura,
+    medio:p.medio||'',
     monto:Number(p.monto||0),id:p.id
   }));
-  const movs=[...rems,...pags].sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  const movs=[...rems,...pags].sort((a,b)=>{
+    // Ordenar por fecha descendente
+    const fd=b.fecha.localeCompare(a.fecha);
+    if(fd!==0) return fd;
+    // Mismo día: usar creadoEn completo (incluye hora) como desempate
+    const ca=a.creadoEn||'';
+    const cb=b.creadoEn||'';
+    if(ca&&cb) return cb.localeCompare(ca);
+    // Último recurso: número de remito descendente
+    return Number(b.numero||0)-Number(a.numero||0);
+  });
 
   if(!movs.length){
     document.getElementById('ip-cuenta-body').innerHTML=statsHTML+'<div class="empty">Sin movimientos registrados</div>';
