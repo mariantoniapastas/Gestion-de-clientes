@@ -490,6 +490,13 @@ const fmt=n=>Number(n).toLocaleString('es-AR');
 const fmtP=n=>'$ '+fmt(n);
 const rd=n=>Math.round(n/100)*100;
 const hoy=()=>new Date().toISOString().slice(0,10);
+const fmtFecha=f=>{
+  if(!f) return '—';
+  const s=String(f).slice(0,10);
+  if(!s.includes('-')) return s;
+  const[y,m,d]=s.split('-');
+  return `${d}/${m}/${y}`;
+};
 
 function lbCls(listaId){
   const m={
@@ -720,7 +727,9 @@ function renderCuenta(){
   const rems=S.remitos.filter(r=>r.clienteId===id&&r.estado!=='anulado').map(r=>({
     tipo:r.tipo||'remito',fecha:r.fecha||r.creadoEn?.slice(0,10)||'',
     desc:`${r.tipo==='entrega'?'Entrega':'Remito'} N° ${String(r.numero).padStart(4,'0')}${r.obs?' — '+r.obs:''}`,
-    monto:Number(r.total||0),id:r.id
+    monto:Number(r.total||0),id:r.id,
+    reqFactura:r.requiereFactura||false,
+    facturado:r.facturado||false
   }));
   const pags=S.pagos.filter(p=>p.clienteId===id).map(p=>({
     tipo:'pago',fecha:p.fecha||'',
@@ -728,7 +737,7 @@ function renderCuenta(){
     medio:p.medio||'',factura:p.requiereFactura,
     monto:Number(p.monto||0),id:p.id
   }));
-  const movs=[...rems,...pags].sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  const movs=[...rems,...pags].sort((a,b)=>b.fecha.localeCompare(a.fecha));
 
   if(!movs.length){
     document.getElementById('ip-cuenta-body').innerHTML=statsHTML+'<div class="empty">Sin movimientos registrados</div>';
@@ -741,11 +750,12 @@ function renderCuenta(){
     const tipoCls=m.tipo==='entrega'?'mt-ent':esCargo?'mt-rem':'mt-pago';
     const tipoLabel=m.tipo==='entrega'?'ENTREGA':esCargo?'REMITO':'PAGO';
     return `<div class="mov">
-      <span class="mov-fecha">${m.fecha||'—'}</span>
+      <span class="mov-fecha">${fmtFecha(m.fecha)}</span>
       <span class="mov-desc">${m.desc}
         <span class="mov-tipo ${tipoCls}">${tipoLabel}</span>
         ${m.medio?`<span style="font-size:9px;color:var(--tx-m)"> · ${m.medio}</span>`:''}
-        ${m.factura?`<span style="font-size:9px;background:#fff8e1;color:#f57f17;border:1px solid #f9a825;padding:1px 4px;margin-left:4px">FACTURA</span>`:''}
+        ${m.reqFactura&&!m.facturado?`<span onclick="marcarFacturado('${m.id}')" style="font-size:9px;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;padding:2px 6px;margin-left:6px;cursor:pointer;font-weight:bold" title="Click para marcar facturado">A FACTURAR ▸</span>`:''}
+        ${m.facturado?`<span style="font-size:9px;background:var(--green-l);color:var(--green);border:1px solid var(--green-b);padding:2px 6px;margin-left:6px;font-weight:bold">FACTURADO ✓</span>`:''}
       </span>
       <span class="mov-monto ${esCargo?'cargo':'abono'}">${esCargo?'+':'-'} ${fmtP(m.monto)}</span>
       <span class="mov-saldo" style="color:${saldoAcum>0?'var(--red)':saldoAcum<0?'var(--green)':'var(--tx-m)'}">${fmtP(Math.abs(saldoAcum))}</span>
@@ -892,6 +902,12 @@ function renderNuevoRemito(){
       </div>
       <div class="ff"><label>Observaciones</label><input type="text" id="rem-obs" value="${S.remObs||''}"></div>
       <div class="ff"><label>Envío</label><input type="number" id="rem-envio" value="${envioVal}" step="100" min="0" onchange="S.envioRem=parseFloat(this.value)||0;renderNuevoRemito()"></div>
+      <div class="ff" style="justify-content:flex-end;padding-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;font-weight:normal">
+          <input type="checkbox" id="rem-factura" ${S.remFactura?'checked':''} style="width:16px;height:16px;cursor:pointer">
+          Requiere factura AFIP
+        </label>
+      </div>
     </div>
     <div class="add-item-row">
       <div class="ff" style="margin-bottom:0"><label>Producto</label><select id="sel-prod">${optsHTML}</select></div>
@@ -967,9 +983,10 @@ async function _emitirRemito(){
   const pago=document.getElementById('rem-pago')?.value||'Contado';
   const obs=document.getElementById('rem-obs')?.value||'';
   const envio=S.envioRem||0;
+  const reqFactura=document.getElementById('rem-factura')?.checked||false;
   const total=S.items.reduce((s,it)=>s+it.cantidad*it.precio,0)+envio;
   const itemsConEnvio=envio>0?[...S.items,{productoId:'envio',codigo:'ENV',displayNombre:'Costo de Envío',unidad:'u',cantidad:1,precio:envio,nivel:'—'}]:S.items;
-  const rd2={numero,fecha,clienteId:cli.id,clienteNombre:cli.nombre,condPago:pago,obs,listaId:lista?.id||''};
+  const rd2={numero,fecha,clienteId:cli.id,clienteNombre:cli.nombre,condPago:pago,obs,listaId:lista?.id||'',requiereFactura:reqFactura,facturado:false};
   fillPrintArea(numero,fecha,pago,obs,cli,lista,S.items,envio);
   try{
     if(S.editRemitoId){
@@ -977,7 +994,7 @@ async function _emitirRemito(){
       if(res.ok){const idx=S.remitos.findIndex(r=>r.id===S.editRemitoId);if(idx>=0) S.remitos[idx]={...S.remitos[idx],...rd2,total};}
     }else{
       const res=await api({action:'saveRemito',remito:encodeURIComponent(JSON.stringify(rd2)),items:encodeURIComponent(JSON.stringify(itemsConEnvio))});
-      if(res.ok) S.remitos.push({id:res.id,numero,fecha,clienteId:cli.id,clienteNombre:cli.nombre,listaId:lista?.id||'',total,estado:'pendiente',abonado:0,creadoEn:new Date().toISOString()});
+      if(res.ok) S.remitos.push({id:res.id,numero,fecha,clienteId:cli.id,clienteNombre:cli.nombre,listaId:lista?.id||'',total,estado:'pendiente',abonado:0,requiereFactura:reqFactura,facturado:false,creadoEn:new Date().toISOString()});
     }
   }catch(e){console.warn(e);}
   S.items=[];S.editRemitoId=null;S.editRemitoNum=null;S.envioRem=0;
@@ -1787,6 +1804,15 @@ function updatePinDots(){
 }
 
 // ── GESTIÓN ───────────────────────────────────────────────────
+async function marcarFacturado(remitoId){
+  const r=S.remitos.find(r=>r.id===remitoId);
+  if(!r) return;
+  r.facturado=true;
+  try{ await api({action:'updateEstado',id:remitoId,estado:r.estado||'pendiente',facturado:'true'}); }
+  catch(e){ console.warn(e); }
+  renderCuenta();
+}
+
 function renderGestion(){
   const anio=document.getElementById('gest-anio')?.value;
   const mes=document.getElementById('gest-mes')?.value;
@@ -1835,12 +1861,63 @@ function renderGestion(){
     <td class="r" style="color:${c.diferencia<0?'var(--red)':c.diferencia>0?'var(--green)':'var(--tx-m)'}">${fmtP(c.diferencia)}</td>
   </tr>`).join('');
 
+  // AFIP facturado
+  const totalAFIP=remsFiltr.filter(r=>r.requiereFactura||r.reqFactura).reduce((s,r)=>s+Number(r.total||0),0);
+  const totalAFIPfact=remsFiltr.filter(r=>r.facturado).reduce((s,r)=>s+Number(r.total||0),0);
+  const totalAFIPpend=totalAFIP-totalAFIPfact;
+
+  // Detalle semanal por cliente
+  function getSemana(fecha){
+    const d=new Date(fecha+'T12:00:00');
+    const inicio=new Date(d);
+    inicio.setDate(d.getDate()-d.getDay()+1); // lunes
+    return inicio.toISOString().slice(0,10);
+  }
+  const semanas={};
+  remsFiltr.forEach(r=>{
+    const k=getSemana(r.fecha||r.creadoEn?.slice(0,10)||'2026-01-01');
+    if(!semanas[k]) semanas[k]={};
+    if(!semanas[k][r.clienteId]) semanas[k][r.clienteId]={comp:0,cobr:0,nombre:r.clienteNombre};
+    semanas[k][r.clienteId].comp+=Number(r.total||0);
+  });
+  pagsFiltr.forEach(p=>{
+    const k=getSemana(p.fecha||'2026-01-01');
+    if(!semanas[k]) semanas[k]={};
+    if(!semanas[k][p.clienteId]) semanas[k][p.clienteId]={comp:0,cobr:0,nombre:p.clienteNombre};
+    semanas[k][p.clienteId].cobr+=Number(p.monto||0);
+  });
+  const semKeys=Object.keys(semanas).sort().reverse();
+  const semRows=semKeys.map(k=>{
+    const clis=Object.values(semanas[k]).filter(c=>c.comp>0||c.cobr>0);
+    const totalSem=clis.reduce((s,c)=>s+c.comp,0);
+    const cobrSem=clis.reduce((s,c)=>s+c.cobr,0);
+    const detalle=clis.map(c=>`
+      <tr style="background:var(--bg-alt)">
+        <td style="padding-left:24px;font-size:11px;color:var(--tx-s)">${c.nombre}</td>
+        <td class="r" style="font-size:11px">${c.comp>0?fmtP(c.comp):'—'}</td>
+        <td class="r" style="font-size:11px;color:var(--green)">${c.cobr>0?fmtP(c.cobr):'—'}</td>
+        <td class="r" style="font-size:11px;color:${c.comp-c.cobr>0?'var(--red)':'var(--green)'}">${fmtP(c.comp-c.cobr)}</td>
+      </tr>`).join('');
+    const lunes=new Date(k+'T12:00:00');
+    const viernes=new Date(lunes);viernes.setDate(lunes.getDate()+4);
+    const label=`${lunes.getDate()}/${lunes.getMonth()+1} — ${viernes.getDate()}/${viernes.getMonth()+1}/${viernes.getFullYear()}`;
+    return `<tr style="cursor:pointer;font-weight:bold" onclick="this.nextElementSibling?.classList.toggle('hidden')">
+      <td>▸ Semana ${label}</td>
+      <td class="r">${fmtP(totalSem)}</td>
+      <td class="r" style="color:var(--green)">${fmtP(cobrSem)}</td>
+      <td class="r" style="color:${totalSem-cobrSem>0?'var(--red)':'var(--green)'}">${fmtP(totalSem-cobrSem)}</td>
+    </tr>
+    <tbody class="hidden">${detalle}</tbody>`;
+  }).join('');
+
   document.getElementById('gest-body').innerHTML=`
     <!-- STATS -->
-    <div class="grid3" style="margin-bottom:14px">
-      <div class="stat"><div class="stat-label">Total facturado</div><div class="stat-val">${fmtP(totalFact)}</div><div class="stat-sub">${remsFiltr.length} remitos</div></div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+      <div class="stat"><div class="stat-label">Total emitido</div><div class="stat-val">${fmtP(totalFact)}</div><div class="stat-sub">${remsFiltr.length} remitos</div></div>
       <div class="stat"><div class="stat-label">Total cobrado</div><div class="stat-val green">${fmtP(totalCobr)}</div><div class="stat-sub">${pagsFiltr.length} pagos</div></div>
       <div class="stat"><div class="stat-label">Balance</div><div class="stat-val ${balance<0?'red':balance>0?'green':'navy'}">${fmtP(Math.abs(balance))}</div><div class="stat-sub">${balance<0?'Por cobrar':balance>0?'A favor':'Equilibrado'}</div></div>
+      <div class="stat"><div class="stat-label">Req. factura AFIP</div><div class="stat-val orange">${fmtP(totalAFIP)}</div><div class="stat-sub">${fmtP(totalAFIPpend)} pendiente</div></div>
+      <div class="stat"><div class="stat-label">Facturado AFIP</div><div class="stat-val green">${fmtP(totalAFIPfact)}</div><div class="stat-sub">de ${fmtP(totalAFIP)} total</div></div>
     </div>
     <!-- POR CLIENTE -->
     <div class="card" style="margin-bottom:14px">
@@ -1857,12 +1934,21 @@ function renderGestion(){
       </table>
     </div>
     <!-- MENSUAL ANUAL -->
-    <div class="card">
+    <div class="card" style="margin-bottom:14px">
       <div class="card-title">Resumen mensual — ${anio}</div>
       <table class="tbl">
-        <thead><tr><th>Mes</th><th class="r">Facturado</th><th class="r">Cobrado</th><th class="r">Balance</th></tr></thead>
+        <thead><tr><th>Mes</th><th class="r">Emitido</th><th class="r">Cobrado</th><th class="r">Balance</th></tr></thead>
         <tbody>${mesesRows||'<tr><td colspan="4" class="empty">Sin datos</td></tr>'}</tbody>
       </table>
+    </div>
+    <!-- DETALLE SEMANAL -->
+    <div class="card">
+      <div class="card-title">Detalle semanal por cliente${mes?' — '+['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(mes)]+' '+anio:' — '+anio}</div>
+      <table class="tbl">
+        <thead><tr><th>Semana / Cliente</th><th class="r">Emitido</th><th class="r">Cobrado</th><th class="r">Diferencia</th></tr></thead>
+        <tbody>${semRows||'<tr><td colspan="4" class="empty">Sin datos</td></tr>'}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--tx-m);padding:6px 0">▸ Click en una semana para ver el detalle por cliente</div>
     </div>`;
 }
 
