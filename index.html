@@ -739,7 +739,7 @@ function renderCuenta(){
     tipo:'pago',fecha:p.fecha||'',
     creadoEn:String(p.id||''),
     numero:0,
-    sortKey:String(p.id||''),
+    sortKey:String(p.creadoEn||p.id||''),
     desc:`Pago${p.obs?' — '+p.obs:''}`,
     medio:p.medio||'',
     monto:Number(p.monto||0),id:p.id
@@ -1286,8 +1286,10 @@ async function guardarPago(){
   const monto=parseFloat(document.getElementById('pago-monto')?.value);
   if(!monto||monto<=0){alert('Ingresá un monto válido');if(btn){btn.disabled=false;btn.textContent='REGISTRAR PAGO';}return;}
   const cli=S.clientes.find(c=>c.id===S.cliActiva);
+  const ahora=new Date().toISOString();
   const pago={id:'pago-'+Date.now().toString(36),clienteId:S.cliActiva,clienteNombre:cli?.nombre||'',
     fecha:document.getElementById('pago-fecha')?.value||hoy(),
+    creadoEn:ahora,
     monto,medio:document.getElementById('pago-medio')?.value||'Efectivo',
     obs:document.getElementById('pago-obs')?.value||'',
     requiereFactura:document.getElementById('pago-factura')?.checked||false,
