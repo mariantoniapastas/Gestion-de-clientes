@@ -742,18 +742,17 @@ function renderCuenta(){
     medio:p.medio||'',
     monto:Number(p.monto||0),id:p.id
   }));
-  // Convertir a timestamp para ordenar correctamente
-  const toTS=m=>{
-    // Intentar creadoEn primero (más preciso)
-    if(m.creadoEn){
-      const t=new Date(m.creadoEn).getTime();
-      if(!isNaN(t)) return t;
-    }
-    // Usar fecha del día + numero como aproximación
-    const base=new Date((m.fecha||'2000-01-01')+'T23:59:59Z').getTime();
-    return base + Number(m.numero||0);
-  };
-  const movs=[...rems,...pags].sort((a,b)=>toTS(b)-toTS(a));
+  // Ordenar: fecha descendente, luego número de remito descendente
+  const movs=[...rems,...pags].sort((a,b)=>{
+    const fd=b.fecha.localeCompare(a.fecha);
+    if(fd!==0) return fd;
+    // Mismo día: número más alto = más reciente
+    const na=Number(a.numero)||0;
+    const nb=Number(b.numero)||0;
+    if(na!==nb) return nb-na;
+    // Pagos sin número van al final del día
+    return (b.tipo==='pago'?1:0)-(a.tipo==='pago'?1:0);
+  });
 
   if(!movs.length){
     document.getElementById('ip-cuenta-body').innerHTML=statsHTML+'<div class="empty">Sin movimientos registrados</div>';
