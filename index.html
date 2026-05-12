@@ -732,17 +732,19 @@ function renderCuenta(){
     sortKey:String(r.creadoEn||r.id||''),
     desc:`${r.tipo==='entrega'?'Entrega':'Remito'} N° ${String(r.numero).padStart(4,'0')}${r.obs?' — '+r.obs:''}`,
     monto:Number(r.total||0),id:r.id,
-    reqFactura:!!(r.requiereFactura||r.reqFactura),
-    facturado:!!(r.facturado===true||r.facturado==='true'||r.facturado==='TRUE')
+    reqFactura:r.requiereFactura===true||r.requiereFactura==='true'||r.requiereFactura==='TRUE'||r.requiereFactura===1,
+    facturado:r.facturado===true||r.facturado==='true'||r.facturado==='TRUE'||r.facturado===1
   }));
   const pags=S.pagos.filter(p=>p.clienteId===id).map(p=>({
     tipo:'pago',fecha:p.fecha||'',
-    creadoEn:String(p.id||''),
+    creadoEn:String(p.creadoEn||p.id||''),
     numero:0,
     sortKey:String(p.creadoEn||p.id||''),
     desc:`Pago${p.obs?' — '+p.obs:''}`,
     medio:p.medio||'',
-    monto:Number(p.monto||0),id:p.id
+    monto:Number(p.monto||0),id:p.id,
+    reqFactura:p.requiereFactura===true||p.requiereFactura==='true'||p.requiereFactura==='TRUE'||p.requiereFactura===1,
+    facturado:p.facturado===true||p.facturado==='true'||p.facturado==='TRUE'||p.facturado===1
   }));
   const movs=[...rems,...pags].sort((a,b)=>{
     // Fecha truncada YYYY-MM-DD descendente
@@ -772,8 +774,8 @@ function renderCuenta(){
       <span class="mov-desc">${m.desc}
         <span class="mov-tipo ${tipoCls}">${tipoLabel}</span>
         ${m.medio?`<span style="font-size:9px;color:var(--tx-m)"> · ${m.medio}</span>`:''}
-        ${m.reqFactura&&!m.facturado?`<span onclick="marcarFacturado('${m.id}')" style="font-size:9px;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;padding:2px 6px;margin-left:6px;cursor:pointer;font-weight:bold" title="Click para marcar facturado">A FACTURAR ▸</span>`:''}
-        ${m.facturado?`<span style="font-size:9px;background:var(--green-l);color:var(--green);border:1px solid var(--green-b);padding:2px 6px;margin-left:6px;font-weight:bold">FACTURADO ✓</span>`:''}
+        ${m.tipo==='pago'&&m.reqFactura&&!m.facturado?`<span onclick="marcarPagoFacturado('${m.id}')" style="font-size:9px;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;padding:2px 6px;margin-left:6px;cursor:pointer;font-weight:bold" title="Click para marcar como facturado">A FACTURAR ▸</span>`:''}
+        ${m.tipo==='pago'&&m.facturado?`<span style="font-size:9px;background:var(--green-l);color:var(--green);border:1px solid var(--green-b);padding:2px 6px;margin-left:6px;font-weight:bold">FACTURADO ✓</span>`:''}
       </span>
       <span class="mov-monto ${esCargo?'cargo':'abono'}">${esCargo?'+':'-'} ${fmtP(m.monto)}</span>
       <span class="mov-saldo" style="color:${saldoAcum>0?'var(--red)':saldoAcum<0?'var(--green)':'var(--tx-m)'}">${fmtP(Math.abs(saldoAcum))}</span>
@@ -920,12 +922,6 @@ function renderNuevoRemito(){
       </div>
       <div class="ff"><label>Observaciones</label><input type="text" id="rem-obs" value="${S.remObs||''}"></div>
       <div class="ff"><label>Envío</label><input type="number" id="rem-envio" value="${envioVal}" step="100" min="0" onchange="S.envioRem=parseFloat(this.value)||0;renderNuevoRemito()"></div>
-      <div class="ff" style="justify-content:flex-end;padding-top:4px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;font-weight:normal">
-          <input type="checkbox" id="rem-factura" ${S.remFactura?'checked':''} style="width:16px;height:16px;cursor:pointer">
-          Requiere factura AFIP
-        </label>
-      </div>
     </div>
     <div class="add-item-row">
       <div class="ff" style="margin-bottom:0"><label>Producto</label><select id="sel-prod">${optsHTML}</select></div>
@@ -1123,9 +1119,12 @@ function openModal(type){
         </div>
         <div class="ff"><label>Observaciones</label><input type="text" id="pago-obs" placeholder="Notas..."></div>
       </div>
-      <div class="ff"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:12px">
-        <input type="checkbox" id="pago-factura"> Requiere factura
-      </label></div>
+      <div class="ff">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;font-weight:normal">
+          <input type="checkbox" id="pago-factura" style="width:16px;height:16px;cursor:pointer">
+          Requiere factura AFIP
+        </label>
+      </div>
       <div class="modal-btns">
         <button class="btn-s" onclick="closeModal()">Cancelar</button>
         <button class="btn-g" onclick="guardarPago()" id="btn-pago">REGISTRAR PAGO</button>
@@ -1824,12 +1823,14 @@ function updatePinDots(){
 }
 
 // ── GESTIÓN ───────────────────────────────────────────────────
-async function marcarFacturado(remitoId){
-  const r=S.remitos.find(r=>r.id===remitoId);
-  if(!r) return;
-  r.facturado=true;
-  try{ await api({action:'updateEstado',id:remitoId,estado:r.estado||'pendiente',facturado:'true'}); }
-  catch(e){ console.warn(e); }
+async function marcarPagoFacturado(pagoId){
+  const p=S.pagos.find(p=>p.id===pagoId);
+  if(!p) return;
+  p.facturado=true;
+  try{
+    const pagoAct={...p,facturado:true};
+    await api({action:'savePago',data:encodeURIComponent(JSON.stringify(pagoAct))});
+  }catch(e){ console.warn(e); }
   renderCuenta();
 }
 
