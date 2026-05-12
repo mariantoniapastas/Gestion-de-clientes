@@ -729,6 +729,7 @@ function renderCuenta(){
     fecha:String(r.fecha||r.creadoEn||'').slice(0,10),
     creadoEn:String(r.creadoEn||''),
     numero:Number(r.numero)||0,
+    sortKey:String(r.creadoEn||r.id||''),
     desc:`${r.tipo==='entrega'?'Entrega':'Remito'} N° ${String(r.numero).padStart(4,'0')}${r.obs?' — '+r.obs:''}`,
     monto:Number(r.total||0),id:r.id,
     reqFactura:!!(r.requiereFactura||r.reqFactura),
@@ -738,20 +739,22 @@ function renderCuenta(){
     tipo:'pago',fecha:p.fecha||'',
     creadoEn:String(p.id||''),
     numero:0,
+    sortKey:String(p.id||''),
     desc:`Pago${p.obs?' — '+p.obs:''}`,
     medio:p.medio||'',
     monto:Number(p.monto||0),id:p.id
   }));
   const movs=[...rems,...pags].sort((a,b)=>{
-    // Comparar fecha truncada a 10 chars (YYYY-MM-DD)
+    // Fecha truncada YYYY-MM-DD descendente
     const fa=String(a.fecha||'').slice(0,10);
     const fb=String(b.fecha||'').slice(0,10);
     const fd=fb.localeCompare(fa);
     if(fd!==0) return fd;
-    // Mismo día: número de remito descendente
-    const nb=Number(b.numero)||0;
-    const na=Number(a.numero)||0;
-    return nb-na;
+    // Mismo día: remitos por número descendente, pagos por sortKey descendente
+    if(a.tipo!=='pago'&&b.tipo!=='pago') return Number(b.numero||0)-Number(a.numero||0);
+    if(a.tipo==='pago'&&b.tipo==='pago') return b.sortKey.localeCompare(a.sortKey);
+    // Mezcla remito/pago: sortKey para todos
+    return (b.sortKey||'').localeCompare(a.sortKey||'');
   });
 
   if(!movs.length){
