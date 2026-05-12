@@ -726,9 +726,9 @@ function renderCuenta(){
 
   const rems=S.remitos.filter(r=>r.clienteId===id&&r.estado!=='anulado').map(r=>({
     tipo:r.tipo||'remito',
-    fecha:r.fecha||String(r.creadoEn||'').slice(0,10)||'',
+    fecha:String(r.fecha||r.creadoEn||'').slice(0,10),
     creadoEn:String(r.creadoEn||''),
-    numero:r.numero||0,
+    numero:Number(r.numero)||0,
     desc:`${r.tipo==='entrega'?'Entrega':'Remito'} N° ${String(r.numero).padStart(4,'0')}${r.obs?' — '+r.obs:''}`,
     monto:Number(r.total||0),id:r.id,
     reqFactura:!!(r.requiereFactura||r.reqFactura),
@@ -742,16 +742,16 @@ function renderCuenta(){
     medio:p.medio||'',
     monto:Number(p.monto||0),id:p.id
   }));
-  // Ordenar: fecha descendente, luego número de remito descendente
   const movs=[...rems,...pags].sort((a,b)=>{
-    const fd=b.fecha.localeCompare(a.fecha);
+    // Comparar fecha truncada a 10 chars (YYYY-MM-DD)
+    const fa=String(a.fecha||'').slice(0,10);
+    const fb=String(b.fecha||'').slice(0,10);
+    const fd=fb.localeCompare(fa);
     if(fd!==0) return fd;
-    // Mismo día: número más alto = más reciente
-    const na=Number(a.numero)||0;
+    // Mismo día: número de remito descendente
     const nb=Number(b.numero)||0;
-    if(na!==nb) return nb-na;
-    // Pagos sin número van al final del día
-    return (b.tipo==='pago'?1:0)-(a.tipo==='pago'?1:0);
+    const na=Number(a.numero)||0;
+    return nb-na;
   });
 
   if(!movs.length){
