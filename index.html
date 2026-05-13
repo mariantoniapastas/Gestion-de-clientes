@@ -127,6 +127,8 @@ body{font-family:'DM Mono','Courier New',monospace;background:var(--bg);color:va
 /* ── MOVIMIENTOS CC ── */
 .mov{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--b-l);font-size:14px}
 .mov:hover{background:var(--bg-alt)}
+.mov .mov-btns{opacity:0;transition:opacity .15s;display:flex;gap:4px;flex-shrink:0}
+.mov:hover .mov-btns{opacity:1}
 .mov-fecha{font-size:12px;color:var(--tx-s);width:90px;flex-shrink:0}
 .mov-desc{flex:1;min-width:0}
 .mov-tipo{font-size:9px;padding:2px 6px;letter-spacing:1px;font-weight:bold;margin-left:5px}
@@ -779,6 +781,10 @@ function renderCuenta(){
       </span>
       <span class="mov-monto ${esCargo?'cargo':'abono'}">${esCargo?'+':'-'} ${fmtP(m.monto)}</span>
       <span class="mov-saldo" style="color:${saldoAcum>0?'var(--red)':saldoAcum<0?'var(--green)':'var(--tx-m)'}">${fmtP(Math.abs(saldoAcum))}</span>
+      <div class="mov-btns">
+        ${m.tipo==='pago'?`<button onclick="openEditarPago('${m.id}')" style="background:none;border:1px solid var(--b-m);cursor:pointer;padding:3px 8px;font-size:12px;color:var(--navy)" title="Editar">✎</button>`:''}
+        <button onclick="eliminarMovimiento('${m.tipo}','${m.id}')" style="background:none;border:1px solid #ef9a9a;cursor:pointer;padding:3px 8px;font-size:12px;color:var(--red)" title="Eliminar">✕</button>
+      </div>
     </div>`;
   }).join('');
   document.getElementById('ip-cuenta-body').innerHTML=statsHTML+`<div style="background:var(--bg-card);border:1px solid var(--b-l)">${rows}</div>`;
@@ -1823,6 +1829,65 @@ function updatePinDots(){
 }
 
 // ── GESTIÓN ───────────────────────────────────────────────────
+function openEditarPago(pagoId){
+  const p=S.pagos.find(p=>p.id===pagoId);
+  if(!p) return;
+  const m=document.getElementById('modal-body');
+  m.innerHTML=`<h3>Editar Pago</h3>
+    <div class="grid2">
+      <div class="ff"><label>Monto</label><input type="number" id="ep-monto" value="${p.monto}" step="100" min="0"></div>
+      <div class="ff"><label>Fecha</label><input type="date" id="ep-fecha" value="${p.fecha||''}"></div>
+      <div class="ff"><label>Medio de pago</label>
+        <select id="ep-medio">
+          <option ${p.medio==='Efectivo'?'selected':''}>Efectivo</option>
+          <option ${p.medio==='Transferencia'?'selected':''}>Transferencia</option>
+          <option ${p.medio==='Cheque'?'selected':''}>Cheque</option>
+        </select>
+      </div>
+      <div class="ff"><label>Observaciones</label><input type="text" id="ep-obs" value="${p.obs||''}"></div>
+    </div>
+    <div class="ff" style="margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;font-weight:normal">
+        <input type="checkbox" id="ep-factura" ${p.requiereFactura===true||p.requiereFactura==='true'||p.requiereFactura==='TRUE'?'checked':''} style="width:16px;height:16px;cursor:pointer">
+        Requiere factura AFIP
+      </label>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-s" onclick="closeModal()">Cancelar</button>
+      <button class="btn" onclick="guardarEditarPago('${pagoId}')">GUARDAR</button>
+    </div>`;
+  document.getElementById('overlay').classList.add('on');
+}
+
+async function guardarEditarPago(pagoId){
+  const p=S.pagos.find(p=>p.id===pagoId);
+  if(!p) return;
+  p.monto=parseFloat(document.getElementById('ep-monto')?.value)||p.monto;
+  p.fecha=document.getElementById('ep-fecha')?.value||p.fecha;
+  p.medio=document.getElementById('ep-medio')?.value||p.medio;
+  p.obs=document.getElementById('ep-obs')?.value||'';
+  p.requiereFactura=document.getElementById('ep-factura')?.checked||false;
+  try{
+    await api({action:'savePagoUpdate',data:encodeURIComponent(JSON.stringify(p))});
+  }catch(e){console.warn(e);}
+  closeModal();
+  renderCuenta();
+}
+
+async function eliminarMovimiento(tipo, id){
+  if(!confirm('¿Eliminar este movimiento? Esta acción no se puede deshacer.')) return;
+  if(tipo==='pago'){
+    try{ await api({action:'delRow',sheet:'Pagos',id}); }catch(e){console.warn(e);}
+    S.pagos=S.pagos.filter(p=>p.id!==id);
+  } else {
+    try{ await api({action:'updateEstado',id,estado:'anulado'}); }catch(e){console.warn(e);}
+    const r=S.remitos.find(r=>r.id===id);
+    if(r) r.estado='anulado';
+  }
+  renderCuenta();
+  renderPerfilStats();
+}
+
 async function marcarPagoFacturado(pagoId){
   const p=S.pagos.find(p=>p.id===pagoId);
   if(!p) return;
