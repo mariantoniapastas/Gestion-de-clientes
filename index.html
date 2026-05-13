@@ -1828,8 +1828,7 @@ async function marcarPagoFacturado(pagoId){
   if(!p) return;
   p.facturado=true;
   try{
-    const pagoAct={...p,facturado:true};
-    await api({action:'savePago',data:encodeURIComponent(JSON.stringify(pagoAct))});
+    await api({action:'updatePago',id:pagoId,facturado:'true'});
   }catch(e){ console.warn(e); }
   renderCuenta();
 }
