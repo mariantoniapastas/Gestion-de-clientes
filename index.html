@@ -413,6 +413,7 @@ body{font-family:'DM Mono','Courier New',monospace;background:var(--bg);color:va
       </div>
     </div>
     <div id="gest-body"></div>
+    <div id="gest-vendedores" style="margin-top:14px"></div>
   </div>
 </div>
 
@@ -469,6 +470,7 @@ const PIN_CORRECTO='1928';
 // ── STATE ──────────────────────────────────────────────────────
 const S={
   clientes:[],listas:[],productos:[],remitos:[],pagos:[],
+  vendedores:[],pagosVendedores:[],
   cliActiva:null,lstActiva:null,
   items:[],editRemitoId:null,
   nivelCount:2,
@@ -538,7 +540,9 @@ async function init(){
     S.listas   = r.listas?.length ? r.listas : [];
     S.productos= r.productos||[];
     S.remitos  = r.remitos||[];
-    S.pagos    = r.pagos||[];
+    S.pagos          = r.pagos          || [];
+    S.vendedores     = r.vendedores     || [];
+    S.pagosVendedores= r.pagosVendedores|| [];
     setStatus('ok');
   }catch(e){
     console.error(e);
@@ -2027,7 +2031,7 @@ function renderGestion(){
       </table>
     </div>
     <!-- DETALLE SEMANAL -->
-    <div class="card">
+    <div class="card" style="margin-bottom:14px">
       <div class="card-title">Detalle semanal por cliente${mes?' — '+['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(mes)]+' '+anio:' — '+anio}</div>
       <table class="tbl">
         <thead><tr><th>Semana / Cliente</th><th class="r">Emitido</th><th class="r">Cobrado</th><th class="r">Diferencia</th></tr></thead>
@@ -2035,6 +2039,234 @@ function renderGestion(){
       </table>
       <div style="font-size:10px;color:var(--tx-m);padding:6px 0">▸ Click en una semana para ver el detalle por cliente</div>
     </div>`;
+  // Renderizar vendedores aparte
+  renderVendedores();
+}
+
+function renderVendedores(){
+  const el=document.getElementById('gest-vendedores');
+  if(!el) return;
+
+  // Calcular comisiones acumuladas por vendedor
+  const resumen=S.vendedores.map(v=>{
+    const saldoInicial=Number(v.saldoInicial||0);
+    // Comisiones generadas por pagos de sus clientes
+    let comisiones=0;
+    (v.clientes||[]).forEach(vc=>{
+      const pct=Number(vc.porcentaje||0)/100;
+      S.pagos.filter(p=>p.clienteId===vc.clienteId).forEach(p=>{
+        comisiones+=Number(p.monto||0)*pct;
+      });
+    });
+    const totalDebe=saldoInicial+comisiones;
+    const totalPagado=S.pagosVendedores.filter(p=>p.vendedorId===v.id).reduce((s,p)=>s+Number(p.monto||0),0);
+    const saldo=totalDebe-totalPagado;
+    return{...v,comisiones,totalDebe,totalPagado,saldo};
+  });
+
+  const totalComisiones=resumen.reduce((s,v)=>s+v.totalDebe,0);
+  const totalPagadoV=resumen.reduce((s,v)=>s+v.totalPagado,0);
+  const totalSaldoV=resumen.reduce((s,v)=>s+v.saldo,0);
+
+  const vendRows=resumen.map(v=>`
+    <tr>
+      <td><strong>${v.nombre}</strong></td>
+      <td style="font-size:11px;color:var(--tx-s)">${(v.clientes||[]).map(vc=>{
+        const cli=S.clientes.find(c=>c.id===vc.clienteId);
+        return (cli?.nombre||vc.clienteId)+' ('+vc.porcentaje+'%)';
+      }).join(', ')}</td>
+      <td class="r">${fmtP(v.comisiones)}</td>
+      <td class="r" style="color:var(--green)">${fmtP(v.totalPagado)}</td>
+      <td class="r" style="color:${v.saldo>0?'var(--red)':'var(--green)'}"><strong>${fmtP(v.saldo)}</strong></td>
+      <td class="c">
+        <button class="btn-s btn-sm" onclick="openPagoVendedor('${v.id}')">+ Pago</button>
+        <button class="btn-s btn-sm" onclick="openEditarVendedor('${v.id}')">✎</button>
+      </td>
+    </tr>`).join('');
+
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-family:'Playfair Display',serif;color:var(--navy);font-size:15px;letter-spacing:2px;text-transform:uppercase;font-weight:600">Vendedores</div>
+      <button class="btn btn-sm" onclick="openNuevoVendedor()">+ Nuevo vendedor</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+      <div class="stat"><div class="stat-label">Total comisiones generadas</div><div class="stat-val orange">${fmtP(totalComisiones)}</div></div>
+      <div class="stat"><div class="stat-label">Total pagado a vendedores</div><div class="stat-val green">${fmtP(totalPagadoV)}</div></div>
+      <div class="stat"><div class="stat-label">Saldo pendiente vendedores</div><div class="stat-val red">${fmtP(totalSaldoV)}</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Detalle por vendedor</div>
+      <table class="tbl">
+        <thead><tr><th>Vendedor</th><th>Clientes asignados</th><th class="r">Comisiones</th><th class="r">Pagado</th><th class="r">Saldo</th><th class="c">Acciones</th></tr></thead>
+        <tbody>${vendRows||'<tr><td colspan="6" class="empty">Sin vendedores</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+function openNuevoVendedor(){
+  const m=document.getElementById('modal-body');
+  const cliOpts=S.clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  m.innerHTML=`<h3>Nuevo Vendedor</h3>
+    <div class="ff" style="margin-bottom:8px"><label>Nombre</label><input type="text" id="nv-nombre" placeholder="Nombre del vendedor"></div>
+    <div class="ff" style="margin-bottom:12px"><label>Saldo inicial (deuda actual)</label><input type="number" id="nv-saldo" placeholder="0" min="0" step="100"></div>
+    <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx-s);margin-bottom:8px">Clientes asignados</div>
+    <div id="nv-clientes-wrap">
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-bottom:6px;align-items:center">
+        <select id="nv-cli-0" style="background:var(--bg-card);border:1px solid var(--b-m);color:var(--tx);padding:6px 8px;font-family:'DM Mono',monospace;font-size:12px;outline:none">
+          <option value="">— Cliente —</option>${cliOpts}
+        </select>
+        <div style="display:flex;align-items:center;gap:4px">
+          <input type="number" id="nv-pct-0" placeholder="%" min="0" max="100" step="0.5"
+            style="width:60px;background:var(--bg-card);border:1px solid var(--b-m);color:var(--tx);padding:6px 7px;font-family:'DM Mono',monospace;font-size:13px;text-align:right;outline:none">
+          <span style="color:var(--tx-s)">%</span>
+        </div>
+      </div>
+    </div>
+    <button onclick="agregarFilaCliente()" class="btn-s btn-sm" style="margin-bottom:14px">+ Agregar cliente</button>
+    <div class="modal-btns">
+      <button class="btn-s" onclick="closeModal()">Cancelar</button>
+      <button class="btn" onclick="guardarNuevoVendedor()">GUARDAR</button>
+    </div>`;
+  document.getElementById('overlay').classList.add('on');
+  S._nvcli=1;
+}
+
+function agregarFilaCliente(){
+  const i=S._nvcli++;
+  const cliOpts=S.clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  const w=document.getElementById('nv-clientes-wrap');
+  const d=document.createElement('div');
+  d.style.cssText='display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-bottom:6px;align-items:center';
+  d.innerHTML=`<select id="nv-cli-${i}" style="background:var(--bg-card);border:1px solid var(--b-m);color:var(--tx);padding:6px 8px;font-family:'DM Mono',monospace;font-size:12px;outline:none">
+    <option value="">— Cliente —</option>${cliOpts}
+  </select>
+  <div style="display:flex;align-items:center;gap:4px">
+    <input type="number" id="nv-pct-${i}" placeholder="%" min="0" max="100" step="0.5"
+      style="width:60px;background:var(--bg-card);border:1px solid var(--b-m);color:var(--tx);padding:6px 7px;font-family:'DM Mono',monospace;font-size:13px;text-align:right;outline:none">
+    <span style="color:var(--tx-s)">%</span>
+  </div>
+  <button onclick="this.parentNode.remove()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>`;
+  w.appendChild(d);
+}
+
+async function guardarNuevoVendedor(){
+  const nombre=document.getElementById('nv-nombre')?.value?.trim();
+  if(!nombre){alert('Ingresá un nombre');return;}
+  const saldoInicial=parseFloat(document.getElementById('nv-saldo')?.value)||0;
+  const clientes=[];
+  for(let i=0;i<S._nvcli;i++){
+    const cliId=document.getElementById('nv-cli-'+i)?.value;
+    const pct=parseFloat(document.getElementById('nv-pct-'+i)?.value)||0;
+    if(cliId&&pct>0) clientes.push({clienteId:cliId,porcentaje:pct});
+  }
+  const id='vend-'+Date.now().toString(36);
+  const v={id,nombre,saldoInicial,clientes};
+  try{await api({action:'saveVendedor',data:encodeURIComponent(JSON.stringify(v))});}catch(e){console.warn(e);}
+  S.vendedores.push(v);
+  closeModal();
+  renderVendedores();
+}
+
+function openEditarVendedor(vendId){
+  const v=S.vendedores.find(v=>v.id===vendId);
+  if(!v) return;
+  const cliOpts=S.clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  S._nvcli=(v.clientes||[]).length||1;
+  const filasClientes=(v.clientes||[{clienteId:'',porcentaje:''}]).map((vc,i)=>`
+    <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-bottom:6px;align-items:center">
+      <select id="nv-cli-${i}" style="background:var(--bg-card);border:1px solid var(--b-m);color:var(--tx);padding:6px 8px;font-family:'DM Mono',monospace;font-size:12px;outline:none">
+        <option value="">— Cliente —</option>
+        ${S.clientes.map(c=>`<option value="${c.id}" ${c.id===vc.clienteId?'selected':''}>${c.nombre}</option>`).join('')}
+      </select>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="number" id="nv-pct-${i}" value="${vc.porcentaje||''}" placeholder="%" min="0" max="100" step="0.5"
+          style="width:60px;background:var(--bg-card);border:1px solid var(--b-m);color:var(--tx);padding:6px 7px;font-family:'DM Mono',monospace;font-size:13px;text-align:right;outline:none">
+        <span style="color:var(--tx-s)">%</span>
+      </div>
+      <button onclick="this.parentNode.remove()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>
+    </div>`).join('');
+  const m=document.getElementById('modal-body');
+  m.innerHTML=`<h3>Editar Vendedor — ${v.nombre}</h3>
+    <div class="ff" style="margin-bottom:8px"><label>Nombre</label><input type="text" id="nv-nombre" value="${v.nombre}"></div>
+    <div class="ff" style="margin-bottom:12px"><label>Saldo inicial</label><input type="number" id="nv-saldo" value="${v.saldoInicial||0}" min="0" step="100"></div>
+    <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx-s);margin-bottom:8px">Clientes asignados</div>
+    <div id="nv-clientes-wrap">${filasClientes}</div>
+    <button onclick="agregarFilaCliente()" class="btn-s btn-sm" style="margin-bottom:14px">+ Agregar cliente</button>
+    <div class="modal-btns">
+      <button class="btn-s" onclick="closeModal()">Cancelar</button>
+      <button class="btn" onclick="guardarEditarVendedor('${vendId}')">GUARDAR</button>
+    </div>`;
+  document.getElementById('overlay').classList.add('on');
+}
+
+async function guardarEditarVendedor(vendId){
+  const v=S.vendedores.find(v=>v.id===vendId);
+  if(!v) return;
+  v.nombre=document.getElementById('nv-nombre')?.value?.trim()||v.nombre;
+  v.saldoInicial=parseFloat(document.getElementById('nv-saldo')?.value)||0;
+  const clientes=[];
+  for(let i=0;i<20;i++){
+    const sel=document.getElementById('nv-cli-'+i);
+    if(!sel) continue;
+    const cliId=sel.value;
+    const pct=parseFloat(document.getElementById('nv-pct-'+i)?.value)||0;
+    if(cliId&&pct>0) clientes.push({clienteId:cliId,porcentaje:pct});
+  }
+  v.clientes=clientes;
+  try{await api({action:'saveVendedor',data:encodeURIComponent(JSON.stringify(v))});}catch(e){console.warn(e);}
+  closeModal();
+  renderVendedores();
+}
+
+function openPagoVendedor(vendId){
+  const v=S.vendedores.find(v=>v.id===vendId);
+  if(!v) return;
+  const resumen=calcResumenVendedor(v);
+  const m=document.getElementById('modal-body');
+  m.innerHTML=`<h3>Registrar pago — ${v.nombre}</h3>
+    <div class="alert alert-${resumen.saldo>0?'w':'ok'}" style="margin-bottom:12px">
+      Saldo pendiente: <strong>${fmtP(resumen.saldo)}</strong>
+    </div>
+    <div class="grid2">
+      <div class="ff"><label>Monto</label><input type="number" id="pv-monto" placeholder="0" step="100" min="0"></div>
+      <div class="ff"><label>Fecha</label><input type="date" id="pv-fecha" value="${hoy()}"></div>
+      <div class="ff"><label>Observaciones</label><input type="text" id="pv-obs" placeholder="Notas..."></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-s" onclick="closeModal()">Cancelar</button>
+      <button class="btn-g" onclick="guardarPagoVendedor('${vendId}')">REGISTRAR PAGO</button>
+    </div>`;
+  document.getElementById('overlay').classList.add('on');
+}
+
+function calcResumenVendedor(v){
+  let comisiones=Number(v.saldoInicial||0);
+  (v.clientes||[]).forEach(vc=>{
+    const pct=Number(vc.porcentaje||0)/100;
+    S.pagos.filter(p=>p.clienteId===vc.clienteId).forEach(p=>{
+      comisiones+=Number(p.monto||0)*pct;
+    });
+  });
+  const totalPagado=S.pagosVendedores.filter(p=>p.vendedorId===v.id).reduce((s,p)=>s+Number(p.monto||0),0);
+  return{comisiones,totalPagado,saldo:comisiones-totalPagado};
+}
+
+async function guardarPagoVendedor(vendId){
+  const monto=parseFloat(document.getElementById('pv-monto')?.value);
+  if(!monto||monto<=0){alert('Ingresá un monto válido');return;}
+  const v=S.vendedores.find(v=>v.id===vendId);
+  const pago={
+    id:'pv-'+Date.now().toString(36),
+    vendedorId:vendId,
+    vendedorNombre:v?.nombre||'',
+    fecha:document.getElementById('pv-fecha')?.value||hoy(),
+    monto,
+    obs:document.getElementById('pv-obs')?.value||''
+  };
+  try{await api({action:'savePagoVendedor',data:encodeURIComponent(JSON.stringify(pago))});}catch(e){console.warn(e);}
+  S.pagosVendedores.push(pago);
+  closeModal();
+  renderVendedores();
 }
 
 init();
