@@ -2053,19 +2053,8 @@ function renderVendedores(){
 
   // Calcular comisiones acumuladas por vendedor
   const resumen=S.vendedores.map(v=>{
-    const saldoInicial=Number(v.saldoInicial||0);
-    // Comisiones generadas por pagos de sus clientes
-    let comisiones=0;
-    (v.clientes||[]).forEach(vc=>{
-      const pct=Number(vc.porcentaje||0)/100;
-      S.pagos.filter(p=>p.clienteId===vc.clienteId).forEach(p=>{
-        comisiones+=Number(p.monto||0)*pct;
-      });
-    });
-    const totalDebe=saldoInicial+comisiones;
-    const totalPagado=S.pagosVendedores.filter(p=>p.vendedorId===v.id).reduce((s,p)=>s+Number(p.monto||0),0);
-    const saldo=totalDebe-totalPagado;
-    return{...v,comisiones,totalDebe,totalPagado,saldo};
+    const r=calcResumenVendedor(v);
+    return{...v,...r};
   });
 
   const totalComisiones=resumen.reduce((s,v)=>s+v.totalDebe,0);
@@ -2112,7 +2101,8 @@ function openNuevoVendedor(){
   const cliOpts=S.clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
   m.innerHTML=`<h3>Nuevo Vendedor</h3>
     <div class="ff" style="margin-bottom:8px"><label>Nombre</label><input type="text" id="nv-nombre" placeholder="Nombre del vendedor"></div>
-    <div class="ff" style="margin-bottom:12px"><label>Saldo inicial (deuda actual)</label><input type="number" id="nv-saldo" placeholder="0" min="0" step="100"></div>
+    <div class="ff" style="margin-bottom:8px"><label>Saldo inicial (lo que ya le debés hoy)</label><input type="number" id="nv-saldo" placeholder="0" min="0" step="100"></div>
+    <div class="ff" style="margin-bottom:12px"><label>Fecha de inicio (comisiones desde esta fecha)</label><input type="date" id="nv-fecha" value="${hoy()}"></div>
     <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx-s);margin-bottom:8px">Clientes asignados</div>
     <div id="nv-clientes-wrap">
       <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-bottom:6px;align-items:center">
@@ -2163,8 +2153,9 @@ async function guardarNuevoVendedor(){
     const pct=parseFloat(document.getElementById('nv-pct-'+i)?.value)||0;
     if(cliId&&pct>0) clientes.push({clienteId:cliId,porcentaje:pct});
   }
+  const fechaInicio=document.getElementById('nv-fecha')?.value||hoy();
   const id='vend-'+Date.now().toString(36);
-  const v={id,nombre,saldoInicial,clientes};
+  const v={id,nombre,saldoInicial,fechaInicio,clientes};
   try{await api({action:'saveVendedor',data:encodeURIComponent(JSON.stringify(v))});}catch(e){console.warn(e);}
   S.vendedores.push(v);
   closeModal();
@@ -2192,7 +2183,8 @@ function openEditarVendedor(vendId){
   const m=document.getElementById('modal-body');
   m.innerHTML=`<h3>Editar Vendedor — ${v.nombre}</h3>
     <div class="ff" style="margin-bottom:8px"><label>Nombre</label><input type="text" id="nv-nombre" value="${v.nombre}"></div>
-    <div class="ff" style="margin-bottom:12px"><label>Saldo inicial</label><input type="number" id="nv-saldo" value="${v.saldoInicial||0}" min="0" step="100"></div>
+    <div class="ff" style="margin-bottom:8px"><label>Saldo inicial (lo que ya le debés hoy)</label><input type="number" id="nv-saldo" value="${v.saldoInicial||0}" min="0" step="100"></div>
+    <div class="ff" style="margin-bottom:12px"><label>Fecha de inicio (comisiones desde esta fecha)</label><input type="date" id="nv-fecha" value="${v.fechaInicio||hoy()}"></div>
     <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx-s);margin-bottom:8px">Clientes asignados</div>
     <div id="nv-clientes-wrap">${filasClientes}</div>
     <button onclick="agregarFilaCliente()" class="btn-s btn-sm" style="margin-bottom:14px">+ Agregar cliente</button>
@@ -2208,6 +2200,7 @@ async function guardarEditarVendedor(vendId){
   if(!v) return;
   v.nombre=document.getElementById('nv-nombre')?.value?.trim()||v.nombre;
   v.saldoInicial=parseFloat(document.getElementById('nv-saldo')?.value)||0;
+  v.fechaInicio=document.getElementById('nv-fecha')?.value||v.fechaInicio||hoy();
   const clientes=[];
   for(let i=0;i<20;i++){
     const sel=document.getElementById('nv-cli-'+i);
@@ -2244,15 +2237,18 @@ function openPagoVendedor(vendId){
 }
 
 function calcResumenVendedor(v){
-  let comisiones=Number(v.saldoInicial||0);
+  const saldoInicial=Number(v.saldoInicial||0);
+  const fechaInicio=v.fechaInicio||'2099-01-01'; // si no hay fecha, no suma nada
+  let comisiones=0;
   (v.clientes||[]).forEach(vc=>{
     const pct=Number(vc.porcentaje||0)/100;
-    S.pagos.filter(p=>p.clienteId===vc.clienteId).forEach(p=>{
+    S.pagos.filter(p=>p.clienteId===vc.clienteId&&String(p.fecha||'').slice(0,10)>=fechaInicio).forEach(p=>{
       comisiones+=Number(p.monto||0)*pct;
     });
   });
+  const totalDebe=saldoInicial+comisiones;
   const totalPagado=S.pagosVendedores.filter(p=>p.vendedorId===v.id).reduce((s,p)=>s+Number(p.monto||0),0);
-  return{comisiones,totalPagado,saldo:comisiones-totalPagado};
+  return{comisiones,saldoInicial,totalDebe,totalPagado,saldo:totalDebe-totalPagado};
 }
 
 async function guardarPagoVendedor(vendId){
