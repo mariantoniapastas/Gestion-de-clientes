@@ -1957,9 +1957,13 @@ function renderGestion(){
 
   // Detalle semanal por cliente
   function getSemana(fecha){
-    const d=new Date(fecha+'T12:00:00');
+    if(!fecha) return '2000-01-01';
+    const s=String(fecha).slice(0,10);
+    if(!s.match(/^\d{4}-\d{2}-\d{2}$/)) return '2000-01-01';
+    const d=new Date(s+'T12:00:00');
+    if(isNaN(d.getTime())) return '2000-01-01';
     const inicio=new Date(d);
-    inicio.setDate(d.getDate()-d.getDay()+1); // lunes
+    inicio.setDate(d.getDate()-d.getDay()+1);
     return inicio.toISOString().slice(0,10);
   }
   const semanas={};
